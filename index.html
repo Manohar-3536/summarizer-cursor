@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instant Clip Summarizer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Instant Clip Summarizer</h1>
+        
+        <div class="upload-section">
+            <label for="fileUpload" class="upload-box">
+                Drag & Drop Video File Here or Click to Upload
+                <input type="file" id="fileUpload" accept="video/*">
+            </label>
+        </div>
+
+        <div class="divider">OR</div>
+
+        <input type="text" id="youtubeUrl" placeholder="Paste YouTube URL here">
+        
+        <button id="processBtn">Summarize</button>
+
+        <div class="summary-box">
+            <h2>Summary</h2>
+            <p id="summaryText">Your summary will appear here...</p>
+        </div>
+
+        <button id="downloadBtn">Download Summary</button>
+    </div>
+</body>
+</html>
