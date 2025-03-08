@@ -89,8 +89,18 @@ async function getYouTubeAudio(url) {
       preferFreeFormats: true,
       addHeader: [
         'referer:youtube.com',
-        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      ]
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      ],
+      cookies: 'CONSENT=YES+1',
+      format: 'bestaudio',
+      geoBypass: true,
+      skipDownload: false,
+      noPlaylist: true,
+      embedMetadata: true,
+      addMetadata: true,
+      extractorRetries: 3,
+      forceIpv4: true,
+      socketTimeout: 30
     });
     
     return audioPath;
@@ -207,8 +217,14 @@ app.post('/api/summarize-youtube', async (req, res) => {
         preferFreeFormats: true,
         addHeader: [
           'referer:youtube.com',
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        ]
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+        ],
+        cookies: 'CONSENT=YES+1',
+        geoBypass: true,
+        noPlaylist: true,
+        extractorRetries: 3,
+        forceIpv4: true,
+        socketTimeout: 30
       });
 
       const videoTitle = videoInfo.title;
