@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "deepseek-api": "^1.0.6"
+  }
+}
