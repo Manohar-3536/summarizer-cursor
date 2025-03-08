@@ -79,35 +79,90 @@ async function getYouTubeAudio(url) {
   const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
   const audioPath = `uploads/${videoId}.mp3`;
   
-  try {
-    await youtubeDl(url, {
-      extractAudio: true,
-      audioFormat: 'mp3',
-      output: audioPath,
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: [
-        'referer:youtube.com',
-        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-      ],
-      cookies: 'CONSENT=YES+1',
-      format: 'bestaudio',
-      geoBypass: true,
-      skipDownload: false,
-      noPlaylist: true,
-      embedMetadata: true,
-      addMetadata: true,
-      extractorRetries: 3,
-      forceIpv4: true,
-      socketTimeout: 30
-    });
-    
-    return audioPath;
-  } catch (error) {
-    console.error('Error downloading YouTube audio:', error);
-    throw error;
+  const attempts = [
+    // First attempt with standard cookies
+    async () => {
+      const cookiesStr = [
+        'CONSENT=YES+42',
+        'VISITOR_INFO1_LIVE=somevalue',
+        'LOGIN_INFO=somevalue',
+        'YSC=somevalue',
+        'PREF=somevalue',
+        '__Secure-1PSID=somevalue',
+        '__Secure-3PSID=somevalue',
+        'SID=somevalue'
+      ].join('; ');
+
+      return await youtubeDl(url, {
+        extractAudio: true,
+        audioFormat: 'mp3',
+        output: audioPath,
+        noCheckCertificates: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        addHeader: [
+          'referer:youtube.com',
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'accept-language:en-US,en;q=0.5'
+        ],
+        cookies: cookiesStr,
+        format: 'bestaudio/best',
+        geoBypass: true,
+        skipDownload: false,
+        noPlaylist: true,
+        embedMetadata: true,
+        addMetadata: true,
+        extractorRetries: 5,
+        forceIpv4: true,
+        socketTimeout: 60,
+        retries: 10,
+        fragment_retries: 10,
+        bufferSize: 16384
+      });
+    },
+    // Second attempt with minimal options
+    async () => {
+      return await youtubeDl(url, {
+        extractAudio: true,
+        audioFormat: 'mp3',
+        output: audioPath,
+        format: 'bestaudio',
+        noPlaylist: true,
+        noCheckCertificates: true,
+        addHeader: [
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+        ]
+      });
+    },
+    // Third attempt with different format
+    async () => {
+      return await youtubeDl(url, {
+        extractAudio: true,
+        audioFormat: 'mp3',
+        output: audioPath,
+        format: '140/bestaudio/best',
+        geoBypass: true,
+        noCheckCertificates: true,
+        addHeader: [
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+        ]
+      });
+    }
+  ];
+
+  let lastError;
+  for (const attempt of attempts) {
+    try {
+      const result = await attempt();
+      return audioPath;
+    } catch (error) {
+      console.error('Attempt failed:', error.message);
+      lastError = error;
+    }
   }
+
+  throw lastError;
 }
 
 // Helper function to transcribe audio using OpenAI Whisper
@@ -209,23 +264,66 @@ app.post('/api/summarize-youtube', async (req, res) => {
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // Get video info using youtube-dl
-      const videoInfo = await youtubeDl(url, {
-        dumpJson: true,
-        noWarnings: true,
-        noCheckCertificates: true,
-        preferFreeFormats: true,
-        addHeader: [
-          'referer:youtube.com',
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-        ],
-        cookies: 'CONSENT=YES+1',
-        geoBypass: true,
-        noPlaylist: true,
-        extractorRetries: 3,
-        forceIpv4: true,
-        socketTimeout: 30
-      });
+      // Get video info using youtube-dl with multiple attempts
+      let videoInfo;
+      const attempts = [
+        // First attempt with standard options
+        async () => {
+          const cookiesStr = [
+            'CONSENT=YES+42',
+            'VISITOR_INFO1_LIVE=somevalue',
+            'LOGIN_INFO=somevalue',
+            'YSC=somevalue',
+            'PREF=somevalue'
+          ].join('; ');
+
+          return await youtubeDl(url, {
+            dumpJson: true,
+            noWarnings: true,
+            noCheckCertificates: true,
+            preferFreeFormats: true,
+            addHeader: [
+              'referer:youtube.com',
+              'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              'accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+              'accept-language:en-US,en;q=0.5'
+            ],
+            cookies: cookiesStr,
+            geoBypass: true,
+            noPlaylist: true,
+            extractorRetries: 5,
+            forceIpv4: true,
+            socketTimeout: 60
+          });
+        },
+        // Second attempt with minimal options
+        async () => {
+          return await youtubeDl(url, {
+            dumpJson: true,
+            noWarnings: true,
+            format: 'bestaudio',
+            noPlaylist: true,
+            addHeader: [
+              'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+            ]
+          });
+        }
+      ];
+
+      let lastError;
+      for (const attempt of attempts) {
+        try {
+          videoInfo = await attempt();
+          break;
+        } catch (error) {
+          console.error('Video info attempt failed:', error.message);
+          lastError = error;
+        }
+      }
+
+      if (!videoInfo) {
+        throw lastError;
+      }
 
       const videoTitle = videoInfo.title;
       const videoAuthor = videoInfo.uploader;
