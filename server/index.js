@@ -3,7 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
-const ytdl = require('ytdl-core');
+const youtubeDl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const { OpenAI } = require('openai');
@@ -68,23 +68,36 @@ async function extractAudioFromVideo(videoPath) {
   });
 }
 
+// Helper function to validate YouTube URL
+function isValidYouTubeUrl(url) {
+  const pattern = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+  return pattern.test(url);
+}
+
 // Helper function to get YouTube audio
 async function getYouTubeAudio(url) {
-  const videoId = ytdl.getVideoID(url);
+  const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
   const audioPath = `uploads/${videoId}.mp3`;
   
-  return new Promise((resolve, reject) => {
-    ytdl(url, { quality: 'highestaudio' })
-      .pipe(fs.createWriteStream(audioPath))
-      .on('finish', () => {
-        console.log('YouTube audio download completed');
-        resolve(audioPath);
-      })
-      .on('error', (err) => {
-        console.error('Error downloading YouTube audio:', err);
-        reject(err);
-      });
-  });
+  try {
+    await youtubeDl(url, {
+      extractAudio: true,
+      audioFormat: 'mp3',
+      output: audioPath,
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      addHeader: [
+        'referer:youtube.com',
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      ]
+    });
+    
+    return audioPath;
+  } catch (error) {
+    console.error('Error downloading YouTube audio:', error);
+    throw error;
+  }
 }
 
 // Helper function to transcribe audio using OpenAI Whisper
@@ -179,19 +192,29 @@ async function generateSummaryWithDeepSeek(content) {
 app.post('/api/summarize-youtube', async (req, res) => {
   try {
     const { url } = req.body;
-    if (!ytdl.validateURL(url)) {
+    if (!isValidYouTubeUrl(url)) {
       return res.status(400).json({ error: 'Invalid YouTube URL' });
     }
 
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // Get basic video info first
-      const videoInfo = await ytdl.getBasicInfo(url);
-      const videoTitle = videoInfo.videoDetails.title;
-      const videoAuthor = videoInfo.videoDetails.author.name;
-      const videoDuration = videoInfo.videoDetails.lengthSeconds;
-      const videoDescription = videoInfo.videoDetails.description || '';
+      // Get video info using youtube-dl
+      const videoInfo = await youtubeDl(url, {
+        dumpJson: true,
+        noWarnings: true,
+        noCheckCertificates: true,
+        preferFreeFormats: true,
+        addHeader: [
+          'referer:youtube.com',
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        ]
+      });
+
+      const videoTitle = videoInfo.title;
+      const videoAuthor = videoInfo.uploader;
+      const videoDuration = videoInfo.duration;
+      const videoDescription = videoInfo.description || '';
       
       console.log(`Successfully retrieved info for: ${videoTitle}`);
       
@@ -239,11 +262,11 @@ app.post('/api/summarize-youtube', async (req, res) => {
         duration: videoDuration,
         summary: summary
       });
-    } catch (ytdlError) {
-      console.error('YouTube processing error:', ytdlError);
+    } catch (ytError) {
+      console.error('YouTube processing error:', ytError);
       return res.status(500).json({ 
         error: 'Failed to process YouTube video',
-        details: ytdlError.message
+        details: ytError.message
       });
     }
   } catch (error) {
