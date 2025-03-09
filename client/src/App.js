@@ -1,15 +1,5 @@
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import {
-  Container,
-  Box,
-  Typography,
-  TextField,
-  Button,
-  Paper,
-  Divider,
-  CircularProgress
-} from '@mui/material';
 import axios from 'axios';
 
 // Use relative path for API URL in production
@@ -75,73 +65,92 @@ function App() {
   };
 
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
-      <Typography variant="h3" component="h1" gutterBottom align="center">
-        Instant Clip Summarizer
-      </Typography>
+    <div className="min-h-screen py-8 px-4">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl md:text-5xl font-bold text-center mb-8 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
+          Instant Clip Summarizer
+        </h1>
 
-      <Box sx={{ mb: 4 }}>
-        <Paper
-          {...getRootProps()}
-          sx={{
-            p: 3,
-            textAlign: 'center',
-            cursor: 'pointer',
-            bgcolor: isDragActive ? 'action.hover' : 'background.paper',
-            border: '2px dashed',
-            borderColor: isDragActive ? 'primary.main' : 'grey.300'
-          }}
-        >
-          <input {...getInputProps()} />
-          <Typography>
-            {isDragActive
-              ? 'Drop the video here'
-              : 'Drag & drop a video file here, or click to select'}
-          </Typography>
-        </Paper>
-      </Box>
+        <div className="mb-8">
+          <div
+            {...getRootProps()}
+            className={`card cursor-pointer ${
+              isDragActive
+                ? 'border-2 border-purple-500 bg-purple-50'
+                : 'border-2 border-dashed border-gray-300 hover:border-purple-400'
+            } transition-all duration-300`}
+          >
+            <input {...getInputProps()} />
+            <div className="text-center py-8">
+              <svg
+                className="w-12 h-12 mx-auto mb-4 text-purple-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                />
+              </svg>
+              <p className="text-lg text-gray-600">
+                {isDragActive
+                  ? 'Drop the video here'
+                  : 'Drag & drop a video file here, or click to select'}
+              </p>
+            </div>
+          </div>
+        </div>
 
-      <Divider sx={{ my: 4 }}>OR</Divider>
+        <div className="flex items-center my-8">
+          <div className="flex-1 h-px bg-gray-300"></div>
+          <p className="px-4 text-gray-500 font-medium">OR</p>
+          <div className="flex-1 h-px bg-gray-300"></div>
+        </div>
 
-      <Box component="form" onSubmit={handleYoutubeSubmit} sx={{ mb: 4 }}>
-        <TextField
-          fullWidth
-          label="YouTube URL"
-          value={youtubeUrl}
-          onChange={(e) => setYoutubeUrl(e.target.value)}
-          sx={{ mb: 2 }}
-        />
-        <Button
-          fullWidth
-          variant="contained"
-          type="submit"
-          disabled={loading || !youtubeUrl}
-        >
-          Summarize
-        </Button>
-      </Box>
+        <form onSubmit={handleYoutubeSubmit} className="mb-8">
+          <input
+            type="text"
+            placeholder="Enter YouTube URL"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            className="input-field mb-4"
+          />
+          <button
+            type="submit"
+            disabled={loading || !youtubeUrl}
+            className={`btn-primary w-full ${
+              loading || !youtubeUrl ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            Summarize
+          </button>
+        </form>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
+        {loading && (
+          <div className="flex justify-center my-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent"></div>
+          </div>
+        )}
 
-      {error && (
-        <Typography color="error" sx={{ my: 2 }}>
-          {error}
-        </Typography>
-      )}
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-8">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
 
-      {summary && (
-        <Paper sx={{ p: 3, mt: 4 }}>
-          <Typography variant="h6" gutterBottom>
-            Summary
-          </Typography>
-          <Typography sx={{ whiteSpace: 'pre-wrap' }}>{summary}</Typography>
-        </Paper>
-      )}
-    </Container>
+        {summary && (
+          <div className="card bg-white/80 backdrop-blur-sm">
+            <h2 className="text-2xl font-semibold mb-4 text-gray-800">Summary</h2>
+            <div className="prose prose-purple max-w-none">
+              <p className="text-gray-700 whitespace-pre-wrap">{summary}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
