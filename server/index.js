@@ -3,7 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
-const youtubeDl = require('youtube-dl-exec');
+const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const { OpenAI } = require('openai');
@@ -70,99 +70,32 @@ async function extractAudioFromVideo(videoPath) {
 
 // Helper function to validate YouTube URL
 function isValidYouTubeUrl(url) {
-  const pattern = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
-  return pattern.test(url);
+  return ytdl.validateURL(url);
 }
 
-// Helper function to get YouTube audio
-async function getYouTubeAudio(url) {
-  const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
-  const audioPath = `uploads/${videoId}.mp3`;
-  
-  const attempts = [
-    // First attempt with standard cookies
-    async () => {
-      const cookiesStr = [
-        'CONSENT=YES+42',
-        'VISITOR_INFO1_LIVE=somevalue',
-        'LOGIN_INFO=somevalue',
-        'YSC=somevalue',
-        'PREF=somevalue',
-        '__Secure-1PSID=somevalue',
-        '__Secure-3PSID=somevalue',
-        'SID=somevalue'
-      ].join('; ');
+// Helper function to download YouTube video
+async function downloadYouTubeVideo(url) {
+  const videoId = ytdl.getVideoID(url);
+  const videoPath = `uploads/${videoId}.mp4`;
 
-      return await youtubeDl(url, {
-        extractAudio: true,
-        audioFormat: 'mp3',
-        output: audioPath,
-        noCheckCertificates: true,
-        noWarnings: true,
-        preferFreeFormats: true,
-        addHeader: [
-          'referer:youtube.com',
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          'accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'accept-language:en-US,en;q=0.5'
-        ],
-        cookies: cookiesStr,
-        format: 'bestaudio/best',
-        geoBypass: true,
-        skipDownload: false,
-        noPlaylist: true,
-        embedMetadata: true,
-        addMetadata: true,
-        extractorRetries: 5,
-        forceIpv4: true,
-        socketTimeout: 60,
-        retries: 10,
-        fragment_retries: 10,
-        bufferSize: 16384
-      });
-    },
-    // Second attempt with minimal options
-    async () => {
-      return await youtubeDl(url, {
-        extractAudio: true,
-        audioFormat: 'mp3',
-        output: audioPath,
-        format: 'bestaudio',
-        noPlaylist: true,
-        noCheckCertificates: true,
-        addHeader: [
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-        ]
-      });
-    },
-    // Third attempt with different format
-    async () => {
-      return await youtubeDl(url, {
-        extractAudio: true,
-        audioFormat: 'mp3',
-        output: audioPath,
-        format: '140/bestaudio/best',
-        geoBypass: true,
-        noCheckCertificates: true,
-        addHeader: [
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-        ]
-      });
-    }
-  ];
+  return new Promise((resolve, reject) => {
+    const video = ytdl(url, {
+      quality: 'lowest', // We only need audio, so lowest quality is fine
+      filter: 'audioonly',
+    });
 
-  let lastError;
-  for (const attempt of attempts) {
-    try {
-      const result = await attempt();
-      return audioPath;
-    } catch (error) {
-      console.error('Attempt failed:', error.message);
-      lastError = error;
-    }
-  }
+    video.pipe(fs.createWriteStream(videoPath));
 
-  throw lastError;
+    video.on('end', () => {
+      console.log('YouTube video download completed');
+      resolve(videoPath);
+    });
+
+    video.on('error', (err) => {
+      console.error('Error downloading YouTube video:', err);
+      reject(err);
+    });
+  });
 }
 
 // Helper function to transcribe audio using OpenAI Whisper
@@ -200,7 +133,7 @@ async function generateSummaryWithDeepSeek(content) {
     // Make the API call to DeepSeek
     try {
       const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
-        model: "deepseek-reasoner",  // Using DeepSeek-Reasoner model
+        model: "deepseek-reasoner",
         messages: [
           {
             role: "system",
@@ -212,7 +145,7 @@ async function generateSummaryWithDeepSeek(content) {
           }
         ],
         max_tokens: 500,
-        temperature: 0.3  // Lower temperature for more focused summaries
+        temperature: 0.3
       }, {
         headers: {
           'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
@@ -223,33 +156,11 @@ async function generateSummaryWithDeepSeek(content) {
       return response.data.choices[0].message.content;
     } catch (apiError) {
       console.error('DeepSeek API call error:', apiError.response?.data || apiError.message);
-      
-      // Check for insufficient balance error
-      const errorMessage = apiError.response?.data?.error?.message || apiError.message;
-      if (errorMessage.includes('Insufficient Balance')) {
-        return `Your DeepSeek API account has insufficient balance. Please add credits to your account.
-        
-        Here's a preview of the content that would be summarized:
-        ${content.substring(0, 300)}...`;
-      } else if (errorMessage.includes('Model Not Exist')) {
-        return `The specified DeepSeek model does not exist. We've tried using "deepseek-reasoner". Please check available models in your DeepSeek account.
-        
-        Here's a preview of the content that would be summarized:
-        ${content.substring(0, 300)}...`;
-      }
-      
-      // If it's another error, return a generic message
-      return `Failed to generate summary with DeepSeek API. Error: ${errorMessage}
-      
-      Here's a preview of the content that would be summarized:
-      ${content.substring(0, 300)}...`;
+      return `Failed to generate summary with DeepSeek API. Error: ${apiError.message}`;
     }
   } catch (error) {
     console.error('DeepSeek function error:', error);
-    return `Failed to generate summary. Error: ${error.message}
-    
-    Here's a preview of the content that would be summarized:
-    ${content.substring(0, 300)}...`;
+    return `Failed to generate summary. Error: ${error.message}`;
   }
 }
 
@@ -264,96 +175,37 @@ app.post('/api/summarize-youtube', async (req, res) => {
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // Get video info using youtube-dl with multiple attempts
-      let videoInfo;
-      const attempts = [
-        // First attempt with standard options
-        async () => {
-          const cookiesStr = [
-            'CONSENT=YES+42',
-            'VISITOR_INFO1_LIVE=somevalue',
-            'LOGIN_INFO=somevalue',
-            'YSC=somevalue',
-            'PREF=somevalue'
-          ].join('; ');
-
-          return await youtubeDl(url, {
-            dumpJson: true,
-            noWarnings: true,
-            noCheckCertificates: true,
-            preferFreeFormats: true,
-            addHeader: [
-              'referer:youtube.com',
-              'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-              'accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-              'accept-language:en-US,en;q=0.5'
-            ],
-            cookies: cookiesStr,
-            geoBypass: true,
-            noPlaylist: true,
-            extractorRetries: 5,
-            forceIpv4: true,
-            socketTimeout: 60
-          });
-        },
-        // Second attempt with minimal options
-        async () => {
-          return await youtubeDl(url, {
-            dumpJson: true,
-            noWarnings: true,
-            format: 'bestaudio',
-            noPlaylist: true,
-            addHeader: [
-              'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-            ]
-          });
-        }
-      ];
-
-      let lastError;
-      for (const attempt of attempts) {
-        try {
-          videoInfo = await attempt();
-          break;
-        } catch (error) {
-          console.error('Video info attempt failed:', error.message);
-          lastError = error;
-        }
-      }
-
-      if (!videoInfo) {
-        throw lastError;
-      }
-
-      const videoTitle = videoInfo.title;
-      const videoAuthor = videoInfo.uploader;
-      const videoDuration = videoInfo.duration;
-      const videoDescription = videoInfo.description || '';
+      // Get video info
+      const videoInfo = await ytdl.getInfo(url);
+      const videoTitle = videoInfo.videoDetails.title;
+      const videoAuthor = videoInfo.videoDetails.author.name;
+      const videoDuration = parseInt(videoInfo.videoDetails.lengthSeconds);
       
-      console.log(`Successfully retrieved info for: ${videoTitle}`);
-      
-      // For videos shorter than 10 minutes, try to download and transcribe audio
+      // For videos shorter than 10 minutes, download and transcribe
       let transcription = '';
       if (videoDuration < 600) {
         try {
-          console.log('Video is shorter than 10 minutes, downloading audio...');
-          const audioPath = await getYouTubeAudio(url);
+          console.log('Video is shorter than 10 minutes, downloading...');
+          const videoPath = await downloadYouTubeVideo(url);
+          console.log('Extracting audio...');
+          const audioPath = await extractAudioFromVideo(videoPath);
           transcription = await transcribeAudio(audioPath);
           console.log('Transcription completed');
           
-          // Clean up the audio file
+          // Clean up files
           try {
             await unlinkAsync(audioPath);
-            console.log('Audio file deleted');
+            await unlinkAsync(videoPath);
+            console.log('Temporary files deleted');
           } catch (cleanupError) {
-            console.error('Error deleting audio file:', cleanupError);
+            console.error('Error deleting temporary files:', cleanupError);
           }
-        } catch (audioError) {
-          console.error('Audio processing error:', audioError);
-          transcription = `Error processing audio: ${audioError.message}`;
+        } catch (processingError) {
+          console.error('Processing error:', processingError);
+          transcription = `Error processing video: ${processingError.message}`;
         }
       } else {
-        transcription = 'Video is too long for transcription (>10 minutes). Using video metadata only.';
+        transcription = 'Video is too long for transcription (>10 minutes).';
       }
       
       // Content to summarize
@@ -361,7 +213,6 @@ app.post('/api/summarize-youtube', async (req, res) => {
         Title: ${videoTitle}
         Author: ${videoAuthor}
         Duration: ${Math.floor(videoDuration / 60)} minutes and ${videoDuration % 60} seconds
-        Description: ${videoDescription}
         
         Transcription:
         ${transcription}
