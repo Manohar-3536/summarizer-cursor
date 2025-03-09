@@ -54,8 +54,18 @@ async function extractAudioFromVideo(videoPath) {
   
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
-      .output(audioPath)
+      .toFormat('mp3')
       .audioCodec('libmp3lame')
+      .audioBitrate('128k') // Match original Python quality
+      .audioChannels(1) // Mono audio for better speech recognition
+      .audioFrequency(16000) // 16kHz sample rate for Whisper
+      .output(audioPath)
+      .on('start', () => {
+        console.log('Started audio extraction');
+      })
+      .on('progress', (progress) => {
+        console.log(`Processing audio: ${progress.percent}% done`);
+      })
       .on('end', () => {
         console.log('Audio extraction completed');
         resolve(audioPath);
@@ -80,20 +90,34 @@ async function downloadYouTubeVideo(url) {
 
   return new Promise((resolve, reject) => {
     const video = ytdl(url, {
-      quality: 'lowest', // We only need audio, so lowest quality is fine
-      filter: 'audioonly',
+      quality: '140', // Force audio-only format (m4a)
+      filter: format => format.container === 'm4a' && format.audioQuality === 'AUDIO_QUALITY_MEDIUM'
     });
 
-    video.pipe(fs.createWriteStream(videoPath));
+    const writeStream = fs.createWriteStream(videoPath);
+    video.pipe(writeStream);
 
-    video.on('end', () => {
+    writeStream.on('finish', () => {
       console.log('YouTube video download completed');
       resolve(videoPath);
+    });
+
+    writeStream.on('error', (err) => {
+      console.error('Error writing video file:', err);
+      reject(err);
     });
 
     video.on('error', (err) => {
       console.error('Error downloading YouTube video:', err);
       reject(err);
+    });
+
+    // Add progress logging
+    let downloadedBytes = 0;
+    video.on('progress', (chunkLength, downloaded, total) => {
+      downloadedBytes = downloaded;
+      const percent = (downloaded / total * 100).toFixed(2);
+      console.log(`Downloading: ${percent}% (${downloaded}/${total} bytes)`);
     });
   });
 }
@@ -175,7 +199,7 @@ app.post('/api/summarize-youtube', async (req, res) => {
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // Get video info
+      // Get video info first
       const videoInfo = await ytdl.getInfo(url);
       const videoTitle = videoInfo.videoDetails.title;
       const videoAuthor = videoInfo.videoDetails.author.name;
@@ -185,10 +209,16 @@ app.post('/api/summarize-youtube', async (req, res) => {
       let transcription = '';
       if (videoDuration < 600) {
         try {
-          console.log('Video is shorter than 10 minutes, downloading...');
+          // Download video (audio only)
+          console.log('Downloading video audio...');
           const videoPath = await downloadYouTubeVideo(url);
-          console.log('Extracting audio...');
+          
+          // Extract audio
+          console.log('Converting to MP3...');
           const audioPath = await extractAudioFromVideo(videoPath);
+          
+          // Transcribe
+          console.log('Transcribing audio...');
           transcription = await transcribeAudio(audioPath);
           console.log('Transcription completed');
           
@@ -216,9 +246,10 @@ app.post('/api/summarize-youtube', async (req, res) => {
         
         Transcription:
         ${transcription}
-      `;
+      `.trim();
       
-      // Generate summary using DeepSeek
+      // Generate summary
+      console.log('Generating summary...');
       const summary = await generateSummaryWithDeepSeek(contentToSummarize);
       
       res.json({ 
