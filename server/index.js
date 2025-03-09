@@ -56,9 +56,9 @@ async function extractAudioFromVideo(videoPath) {
     ffmpeg(videoPath)
       .toFormat('mp3')
       .audioCodec('libmp3lame')
-      .audioBitrate('128k') // Match original Python quality
-      .audioChannels(1) // Mono audio for better speech recognition
-      .audioFrequency(16000) // 16kHz sample rate for Whisper
+      .audioBitrate('192k') // Higher quality for better transcription
+      .audioChannels(2) // Stereo for better quality
+      .audioFrequency(44100) // CD quality
       .output(audioPath)
       .on('start', () => {
         console.log('Started audio extraction');
@@ -89,13 +89,43 @@ async function downloadYouTubeVideo(url) {
   const videoPath = `uploads/${videoId}.mp4`;
 
   return new Promise((resolve, reject) => {
-    const video = ytdl(url, {
-      quality: '140', // Force audio-only format (m4a)
-      filter: format => format.container === 'm4a' && format.audioQuality === 'AUDIO_QUALITY_MEDIUM'
+    // Set up YouTube cookies and headers
+    const options = {
+      requestOptions: {
+        headers: {
+          // Add common browser headers
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Connection': 'keep-alive',
+          // Add YouTube specific cookies
+          'Cookie': 'CONSENT=YES+cb; YSC=DwKYllHNwuw; VISITOR_INFO1_LIVE=6o0kz_mX7xE; GPS=1'
+        }
+      },
+      quality: 'highestaudio',
+      filter: 'audioonly',
+      format: 'mp3',
+      // Additional options to improve reliability
+      highWaterMark: 1024 * 1024 * 1, // 1MB
+      dlChunkSize: 1024 * 1024 * 1, // 1MB chunks
+    };
+
+    const video = ytdl(url, options);
+    const writeStream = fs.createWriteStream(videoPath);
+
+    let starttime;
+    video.once('response', () => {
+      starttime = Date.now();
     });
 
-    const writeStream = fs.createWriteStream(videoPath);
-    video.pipe(writeStream);
+    video.on('progress', (chunkLength, downloaded, total) => {
+      const percent = downloaded / total;
+      const downloadedMinutes = (Date.now() - starttime) / 1000 / 60;
+      const estimatedDownloadTime = (downloadedMinutes / percent) - downloadedMinutes;
+      console.log(`${(percent * 100).toFixed(2)}% downloaded`);
+      console.log(`(${(downloaded / 1024 / 1024).toFixed(2)}MB of ${(total / 1024 / 1024).toFixed(2)}MB)\n`);
+      console.log(`Estimated download time: ${estimatedDownloadTime.toFixed(2)} minutes`);
+    });
 
     writeStream.on('finish', () => {
       console.log('YouTube video download completed');
@@ -112,13 +142,7 @@ async function downloadYouTubeVideo(url) {
       reject(err);
     });
 
-    // Add progress logging
-    let downloadedBytes = 0;
-    video.on('progress', (chunkLength, downloaded, total) => {
-      downloadedBytes = downloaded;
-      const percent = (downloaded / total * 100).toFixed(2);
-      console.log(`Downloading: ${percent}% (${downloaded}/${total} bytes)`);
-    });
+    video.pipe(writeStream);
   });
 }
 
@@ -199,25 +223,48 @@ app.post('/api/summarize-youtube', async (req, res) => {
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // Get video info first
-      const videoInfo = await ytdl.getInfo(url);
+      // First try to get video info
+      const videoInfo = await ytdl.getBasicInfo(url, {
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Cookie': 'CONSENT=YES+cb; YSC=DwKYllHNwuw; VISITOR_INFO1_LIVE=6o0kz_mX7xE; GPS=1'
+          }
+        }
+      });
+
       const videoTitle = videoInfo.videoDetails.title;
       const videoAuthor = videoInfo.videoDetails.author.name;
       const videoDuration = parseInt(videoInfo.videoDetails.lengthSeconds);
       
-      // For videos shorter than 10 minutes, download and transcribe
       let transcription = '';
       if (videoDuration < 600) {
         try {
-          // Download video (audio only)
-          console.log('Downloading video audio...');
-          const videoPath = await downloadYouTubeVideo(url);
+          console.log('Video is shorter than 10 minutes, processing...');
           
-          // Extract audio
+          // Download video with retries
+          let videoPath = null;
+          let retryCount = 0;
+          const maxRetries = 3;
+          
+          while (retryCount < maxRetries && !videoPath) {
+            try {
+              videoPath = await downloadYouTubeVideo(url);
+            } catch (downloadError) {
+              console.error(`Download attempt ${retryCount + 1} failed:`, downloadError);
+              retryCount++;
+              if (retryCount === maxRetries) {
+                throw new Error('Failed to download video after multiple attempts');
+              }
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+          
+          // Extract and process audio
           console.log('Converting to MP3...');
           const audioPath = await extractAudioFromVideo(videoPath);
           
-          // Transcribe
           console.log('Transcribing audio...');
           transcription = await transcribeAudio(audioPath);
           console.log('Transcription completed');
@@ -248,7 +295,6 @@ app.post('/api/summarize-youtube', async (req, res) => {
         ${transcription}
       `.trim();
       
-      // Generate summary
       console.log('Generating summary...');
       const summary = await generateSummaryWithDeepSeek(contentToSummarize);
       
