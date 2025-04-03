@@ -3,7 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
-const ytdl = require('ytdl-core');
+const play = require('play-dl');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const { OpenAI } = require('openai');
@@ -80,70 +80,55 @@ async function extractAudioFromVideo(videoPath) {
 
 // Helper function to validate YouTube URL
 function isValidYouTubeUrl(url) {
-  return ytdl.validateURL(url);
+  return play.yt_validate(url) === 'video';
 }
 
 // Helper function to download YouTube video
 async function downloadYouTubeVideo(url) {
-  const videoId = ytdl.getVideoID(url);
-  const videoPath = `uploads/${videoId}.mp4`;
+  try {
+    // Get video info
+    const videoInfo = await play.video_info(url);
+    const videoId = videoInfo.video_details.id;
+    const videoPath = `uploads/${videoId}.mp4`;
 
-  return new Promise((resolve, reject) => {
-    // Set up YouTube cookies and headers
-    const options = {
-      requestOptions: {
-        headers: {
-          // Add common browser headers
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Connection': 'keep-alive',
-          // Add YouTube specific cookies
-          'Cookie': 'CONSENT=YES+cb; YSC=DwKYllHNwuw; VISITOR_INFO1_LIVE=6o0kz_mX7xE; GPS=1'
-        }
-      },
-      quality: 'highestaudio',
-      filter: 'audioonly',
-      format: 'mp3',
-      // Additional options to improve reliability
-      highWaterMark: 1024 * 1024 * 1, // 1MB
-      dlChunkSize: 1024 * 1024 * 1, // 1MB chunks
-    };
+    // Get the best audio-only stream
+    const stream = await play.stream_from_info(videoInfo, { quality: 140 }); // 140 is audio-only m4a
 
-    const video = ytdl(url, options);
-    const writeStream = fs.createWriteStream(videoPath);
+    return new Promise((resolve, reject) => {
+      const writeStream = fs.createWriteStream(videoPath);
+      
+      let startTime = Date.now();
+      let totalBytes = 0;
+      
+      stream.stream.on('data', (chunk) => {
+        totalBytes += chunk.length;
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        const bytesPerSecond = totalBytes / elapsedSeconds;
+        const mbPerSecond = (bytesPerSecond / (1024 * 1024)).toFixed(2);
+        console.log(`Download speed: ${mbPerSecond} MB/s`);
+      });
 
-    let starttime;
-    video.once('response', () => {
-      starttime = Date.now();
+      stream.stream.pipe(writeStream);
+
+      writeStream.on('finish', () => {
+        console.log('YouTube video download completed');
+        resolve(videoPath);
+      });
+
+      writeStream.on('error', (err) => {
+        console.error('Error writing video file:', err);
+        reject(err);
+      });
+
+      stream.stream.on('error', (err) => {
+        console.error('Error downloading YouTube video:', err);
+        reject(err);
+      });
     });
-
-    video.on('progress', (chunkLength, downloaded, total) => {
-      const percent = downloaded / total;
-      const downloadedMinutes = (Date.now() - starttime) / 1000 / 60;
-      const estimatedDownloadTime = (downloadedMinutes / percent) - downloadedMinutes;
-      console.log(`${(percent * 100).toFixed(2)}% downloaded`);
-      console.log(`(${(downloaded / 1024 / 1024).toFixed(2)}MB of ${(total / 1024 / 1024).toFixed(2)}MB)\n`);
-      console.log(`Estimated download time: ${estimatedDownloadTime.toFixed(2)} minutes`);
-    });
-
-    writeStream.on('finish', () => {
-      console.log('YouTube video download completed');
-      resolve(videoPath);
-    });
-
-    writeStream.on('error', (err) => {
-      console.error('Error writing video file:', err);
-      reject(err);
-    });
-
-    video.on('error', (err) => {
-      console.error('Error downloading YouTube video:', err);
-      reject(err);
-    });
-
-    video.pipe(writeStream);
-  });
+  } catch (error) {
+    console.error('Error in downloadYouTubeVideo:', error);
+    throw error;
+  }
 }
 
 // Helper function to transcribe audio using OpenAI Whisper
@@ -223,19 +208,12 @@ app.post('/api/summarize-youtube', async (req, res) => {
     console.log(`Processing YouTube URL: ${url}`);
 
     try {
-      // First try to get video info
-      const videoInfo = await ytdl.getBasicInfo(url, {
-        requestOptions: {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Cookie': 'CONSENT=YES+cb; YSC=DwKYllHNwuw; VISITOR_INFO1_LIVE=6o0kz_mX7xE; GPS=1'
-          }
-        }
-      });
-
-      const videoTitle = videoInfo.videoDetails.title;
-      const videoAuthor = videoInfo.videoDetails.author.name;
-      const videoDuration = parseInt(videoInfo.videoDetails.lengthSeconds);
+      // Get video info
+      const videoInfo = await play.video_info(url);
+      const videoDetails = videoInfo.video_details;
+      const videoTitle = videoDetails.title;
+      const videoAuthor = videoDetails.channel?.name || 'Unknown';
+      const videoDuration = videoDetails.durationInSec;
       
       let transcription = '';
       if (videoDuration < 600) {
