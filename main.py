@@ -21,25 +21,35 @@
 #         print("❌ Failed to process subtitles.")
 
 # newer chatgpt one========================================================================
-import extract
-import summarize
-import os
+from extract import extract_transcript
+from summarize import summarize_text
+
+def process_youtube_video(youtube_url):
+    """Process a YouTube video: extract transcript and generate summary."""
+    
+    # Try getting transcript using YouTube Transcript API
+    transcript = extract_transcript(youtube_url)
+    
+    if transcript is None:
+        print("❌ Failed to extract transcript")
+        return None
+    
+    # Generate summary using BART
+    print("📝 Generating summary...")
+    summary = summarize_text(transcript)
+    
+    return summary
+
+def main():
+    # Example usage
+    youtube_url = input("Enter YouTube URL: ")
+    summary = process_youtube_video(youtube_url)
+    
+    if summary:
+        print("\n=== Summary ===")
+        print(summary)
+    else:
+        print("❌ Failed to generate summary")
 
 if __name__ == "__main__":
-    youtube_link = input("Enter YouTube URL: ")
-
-    # Step 1: Extract and transcribe subtitles using Whisper
-    cleaned_text = extract.extract_subtitles_with_whisper(youtube_link)  # Changed function call
-
-    if cleaned_text:
-        # Step 2: Summarize the cleaned text using BART
-        summary = summarize.summarize_text(cleaned_text)
-
-        # Step 3: Save the summary to a file
-        summary_file = "summary.txt"
-        with open(summary_file, "w", encoding="utf-8") as file:
-            file.write(summary)
-
-        print(f"\n✅ Summary saved to {summary_file}")
-    else:
-        print("❌ Failed to process subtitles.")
+    main()
