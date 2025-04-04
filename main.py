@@ -28,11 +28,13 @@ def process_youtube_video(youtube_url):
     """Process a YouTube video: extract transcript and generate summary."""
     
     # Try getting transcript using YouTube Transcript API
-    transcript = extract_transcript(youtube_url)
+    result = extract_transcript(youtube_url)
     
-    if transcript is None:
-        print("❌ Failed to extract transcript")
+    if result.get('status') != 200:
+        print(f"❌ {result.get('error', 'Unknown error')}")
         return None
+    
+    transcript = result.get('text')
     
     # Generate summary using BART
     print("📝 Generating summary...")
